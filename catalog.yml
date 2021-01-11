@@ -1,0 +1,4 @@
+{description: EUREC4A Intake Data Catalog, plugins: {source: [{module: intake_xarray}]},
+  sources: {coral_highres: {args: {consolidated: true, storage_options: {s3: {anon: true,
+            client_kwargs: {endpoint_url: 'https://minio.denby.eu'}}}, urlpath: 'simplecache::s3://eurec4a-environment/bco/coral_highres'},
+      description: CORAL LIDAR at BCO, driver: zarr}}}
