@@ -21,6 +21,7 @@ SOURCE_CATALOG_URL = (
 )
 
 LOCAL_CATALOG_FILENAME = "catalog.yml"
+DATA_TYPE = "lowres"
 
 
 def _read_auth_info():
@@ -30,10 +31,23 @@ def _read_auth_info():
 
 def create_local_dataset(cat, filename):
     datasets = []
-    t0 = datetime.datetime(year=2020, month=1, day=9)
-    for n in tqdm(range(2), desc="downloading source data"):
-        date = t0 + datetime.timedelta(days=n)
-        cat_entry = cat.barbados.bco.CORAL_LIDAR(date=date, content_type="t")
+    kws = {}
+    if DATA_TYPE == "highres":
+        dt = datetime.timedelta(hours=1)
+        endpoint = cat.barbados.bco.CORAL_LIDAR_highres
+        kws['version'] = "2020.09.07/"
+    elif DATA_TYPE == "lowres":
+        dt = datetime.timedelta(days=1)
+        endpoint = cat.barbados.bco.CORAL_LIDAR
+    else:
+        raise NotImplementedError(DATA_TYPE)
+
+    t_start = datetime.datetime(year=2020, month=1, day=9)
+    t_end = datetime.datetime(year=2020, month=2, day=29)
+    n_files = int((t_end - t_start)/dt)
+    for n in tqdm(range(n_files), desc="downloading source data"):
+        date = t_start + n*dt
+        cat_entry = endpoint(date=date, content_type="t", **kws)
         ds = cat_entry.to_dask()
 
         ds["time"] = (
@@ -102,7 +116,7 @@ def _add_to_local_catalog(name, cat_entry):
     cat['sources'][name] = cat_entry
 
     with open(LOCAL_CATALOG_FILENAME, "w") as fh:
-        fh.write(yaml.dump(cat, default_flow_style=True))
+        fh.write(yaml.dump(cat, default_flow_style=None))
 
     print(f"Added `{name}` to local catalog `{LOCAL_CATALOG_FILENAME}`")
 
@@ -132,9 +146,9 @@ def load_and_cleanup(filename_local):
 
 
 def main():
-    name = "coral_highres"
+    name = f"coral_{DATA_TYPE}"
     cat = open_catalog(SOURCE_CATALOG_URL)
-    local_filename = Path("coral_highres_local.nc")
+    local_filename = Path(f"coral_{DATA_TYPE}_local.nc")
     if not local_filename.exists():
         create_local_dataset(cat=cat, filename=local_filename)
 
