@@ -21,7 +21,6 @@ SOURCE_CATALOG_URL = (
 )
 
 LOCAL_CATALOG_FILENAME = "catalog.yml"
-DATA_TYPE = "lowres"
 
 
 def _read_auth_info():
@@ -29,18 +28,18 @@ def _read_auth_info():
         return yaml.load(fh)
 
 
-def create_local_dataset(cat, filename):
+def create_local_dataset(cat, filename, data_resolution):
     datasets = []
     kws = {}
-    if DATA_TYPE == "highres":
+    if data_resolution == "high":
         dt = datetime.timedelta(hours=1)
         endpoint = cat.barbados.bco.CORAL_LIDAR_highres
         kws['version'] = "2020.09.07/"
-    elif DATA_TYPE == "lowres":
+    elif data_resolution == "low":
         dt = datetime.timedelta(days=1)
         endpoint = cat.barbados.bco.CORAL_LIDAR
     else:
-        raise NotImplementedError(DATA_TYPE)
+        raise NotImplementedError(data_resolution)
 
     t_start = datetime.datetime(year=2020, month=1, day=9)
     t_end = datetime.datetime(year=2020, month=2, day=29)
@@ -145,12 +144,13 @@ def load_and_cleanup(filename_local):
     return ds
 
 
-def main():
-    name = f"coral_{DATA_TYPE}"
+def main(data_resolution):
+    name = f"coral_{data_resolution}res"
     cat = open_catalog(SOURCE_CATALOG_URL)
-    local_filename = Path(f"coral_{DATA_TYPE}_local.nc")
+    local_filename = Path("local-data") / f"{name}_local.nc"
     if not local_filename.exists():
-        create_local_dataset(cat=cat, filename=local_filename)
+        local_filename.parent.mkdir(exist_ok=True, parents=True)
+        create_local_dataset(cat=cat, filename=local_filename, data_resolution=data_resolution)
 
     auth_info = _read_auth_info()
     ds = load_and_cleanup(local_filename)
@@ -167,5 +167,10 @@ def main():
 
 
 if __name__ == "__main__":
+    import argparse
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("resolution", type=str, default="low")
+    args = argparser.parse_args()
+
     with ipdb.launch_ipdb_on_exception():
-        main()
+        main(data_resolution=args.resolution)

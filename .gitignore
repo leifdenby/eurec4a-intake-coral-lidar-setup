@@ -1,4 +1,5 @@
 .ipynb_checkpoints/
+local-data/
 secrets.yaml
 .*.sw*
 *.nc
