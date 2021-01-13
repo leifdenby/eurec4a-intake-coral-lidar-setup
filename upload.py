@@ -17,7 +17,7 @@ requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS = "AES256-SHA"
 
 SECRETS_FILENAME = "secrets.yaml"
 SOURCE_CATALOG_URL = (
-    "https://raw.githubusercontent.com/eurec4a/eurec4a-intake/master/catalog.yml"
+    "https://raw.githubusercontent.com/leifdenby/eurec4a-intake/coral-highres/catalog.yml"
 )
 
 LOCAL_CATALOG_FILENAME = "catalog.yml"
@@ -33,25 +33,26 @@ def create_local_dataset(cat, filename, data_resolution):
     kws = {}
     if data_resolution == "high":
         dt = datetime.timedelta(hours=1)
-        endpoint = cat.barbados.bco.CORAL_LIDAR_highres
-        kws['version'] = "2020.09.07/"
+        kws['version'] = "2020.08.12"
+        endpoint = lambda t: cat.barbados.bco.CORAL_LIDAR_highres(t_start=t, **kws)  # noqa
     elif data_resolution == "low":
         dt = datetime.timedelta(days=1)
-        endpoint = cat.barbados.bco.CORAL_LIDAR
+        kws['version'] = "2020.09.07"
+        endpoint = lambda t: cat.barbados.bco.CORAL_LIDAR(date=t, **kws)  # noqa
     else:
         raise NotImplementedError(data_resolution)
 
-    t_start = datetime.datetime(year=2020, month=1, day=9)
-    t_end = datetime.datetime(year=2020, month=2, day=29)
+    t_start = datetime.datetime(year=2020, month=1, day=9, tzinfo=datetime.timezone.utc)
+    t_end = datetime.datetime(year=2020, month=2, day=29, tzinfo=datetime.timezone.utc)
     n_files = int((t_end - t_start)/dt)
     for n in tqdm(range(n_files), desc="downloading source data"):
-        date = t_start + n*dt
-        cat_entry = endpoint(date=date, content_type="t", **kws)
+        t = t_start + n*dt
+        cat_entry = endpoint(t=t)
         ds = cat_entry.to_dask()
 
         ds["time"] = (
             ("Time"),
-            np.datetime64(date) + ds.Time.values.astype("timedelta64[s]"),
+            np.datetime64(t) + ds.Time.values.astype("timedelta64[s]"),
         )
         ds = ds.swap_dims(dict(Time="time"))
         datasets.append(ds)
@@ -62,6 +63,8 @@ def create_local_dataset(cat, filename, data_resolution):
     ds_all = ds_all.swap_dims(dict(Length="Altitude"))
     ds_all = ds_all.rename(dict(Altitude="alt"))
     del(ds_all["Time"])
+
+    ds_all.attrs['version'] = kws['version']
 
     if "_NCProperties" in ds_all:
         del ds_all.attrs["_NCProperties"]
@@ -125,7 +128,7 @@ def _test_local_catalog_entry(name):
     print(cat[name].to_dask())
 
 
-def load_and_cleanup(filename_local):
+def load_and_cleanup(filename_local, data_resolution):
     print("cleaning...", end="", flush=True)
     ds = xr.open_dataset(filename_local)
 
@@ -137,8 +140,13 @@ def load_and_cleanup(filename_local):
     da_q_coral = da_q_coral.where((da_q_coral >= 0.0) * (da_q_coral < 20.0), np.nan)
     ds["WaterVaporMixingRatio"] = da_q_coral
 
-    # only pick out water vapour and temperature variables
-    ds = ds[["WaterVaporMixingRatio", "Temperature355"]].compute()
+    if data_resolution == "low":
+        # only pick out water vapour and temperature variables
+        ds = ds[["WaterVaporMixingRatio", "Temperature355"]].compute()
+    elif data_resolution == "high":
+        ds = ds[["WaterVaporMixingRatio"]].compute()
+    else:
+        raise NotImplementedError(data_resolution)
     print("done!", flush=True)
 
     return ds
@@ -153,7 +161,7 @@ def main(data_resolution):
         create_local_dataset(cat=cat, filename=local_filename, data_resolution=data_resolution)
 
     auth_info = _read_auth_info()
-    ds = load_and_cleanup(local_filename)
+    ds = load_and_cleanup(local_filename, data_resolution=data_resolution)
 
     cat_entry = _add_cat_entry(
         ds=ds,
