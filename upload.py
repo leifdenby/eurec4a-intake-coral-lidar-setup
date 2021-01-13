@@ -52,7 +52,7 @@ def create_local_dataset(cat, filename, data_resolution):
 
         ds["time"] = (
             ("Time"),
-            np.datetime64(t) + ds.Time.values.astype("timedelta64[s]"),
+            [datetime.datetime.utcfromtimestamp(ts) for ts in ds.UnixTime.values]
         )
         ds = ds.swap_dims(dict(Time="time"))
         datasets.append(ds)
