@@ -12,6 +12,7 @@ import requests
 import ipdb
 from tqdm import tqdm
 from intake import open_catalog
+import time
 
 requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS = "AES256-SHA"
 
@@ -21,6 +22,10 @@ SOURCE_CATALOG_URL = (
 )
 
 LOCAL_CATALOG_FILENAME = "catalog.yml"
+
+BACKEND_SLEEP_TIME = 10
+
+DOMAIN = dict(alt=slice(None, 4000))  # up to 4km
 
 
 def _read_auth_info():
@@ -38,7 +43,7 @@ def create_local_dataset(cat, filename, data_resolution):
     elif data_resolution == "low":
         dt = datetime.timedelta(days=1)
         kws['version'] = "2020.09.07"
-        endpoint = lambda t: cat.barbados.bco.CORAL_LIDAR(date=t, **kws)  # noqa
+        endpoint = lambda t: cat.barbados.bco.CORAL_LIDAR(date=t.replace(tzinfo=None), **kws)  # noqa
     else:
         raise NotImplementedError(data_resolution)
 
@@ -48,20 +53,33 @@ def create_local_dataset(cat, filename, data_resolution):
     for n in tqdm(range(n_files), desc="downloading source data"):
         t = t_start + n*dt
         cat_entry = endpoint(t=t)
-        ds = cat_entry.to_dask()
+        ds = None
+        while ds is None:
+            try:
+                ds = cat_entry.to_dask()
+                ds["time"] = (
+                    ("Time"),
+                    [datetime.datetime.utcfromtimestamp(ts) for ts in ds.UnixTime.values]
+                )
+                ds = (
+                    ds
+                    .swap_dims(dict(Time="time"))
+                    .swap_dims(dict(Length="Altitude"))
+                    .rename(dict(Altitude="alt"))
+                    .sel(**DOMAIN)
+                )[["WaterVaporMixingRatio"]]
+                # ensure we have the data locally
+                ds = ds.load()
 
-        ds["time"] = (
-            ("Time"),
-            [datetime.datetime.utcfromtimestamp(ts) for ts in ds.UnixTime.values]
-        )
-        ds = ds.swap_dims(dict(Time="time"))
+                break
+            except Exception as e:
+                print(f"caught exception: {e}")
+                print(f"Sleeping for {BACKEND_SLEEP_TIME}s...")
+                time.sleep(BACKEND_SLEEP_TIME)
+
         datasets.append(ds)
 
     ds_all = xr.concat(datasets, dim="time")
-    ds_all["Altitude"] = ds_all.Altitude.isel(time=0)
-
-    ds_all = ds_all.swap_dims(dict(Length="Altitude"))
-    ds_all = ds_all.rename(dict(Altitude="alt"))
     del(ds_all["Time"])
 
     ds_all.attrs['version'] = kws['version']
@@ -140,13 +158,13 @@ def load_and_cleanup(filename_local, data_resolution):
     da_q_coral = da_q_coral.where((da_q_coral >= 0.0) * (da_q_coral < 20.0), np.nan)
     ds["WaterVaporMixingRatio"] = da_q_coral
 
-    if data_resolution == "low":
-        # only pick out water vapour and temperature variables
-        ds = ds[["WaterVaporMixingRatio", "Temperature355"]].compute()
-    elif data_resolution == "high":
-        ds = ds[["WaterVaporMixingRatio"]].compute()
-    else:
-        raise NotImplementedError(data_resolution)
+    variables = ["WaterVaporMixingRatio"]
+
+    if "Temperature355" in ds.data_vars:
+        variables += ["Temperature355"]
+
+    ds = ds[variables].compute()
+
     print("done!", flush=True)
 
     return ds
